@@ -1,80 +1,31 @@
-# API de Reservas — Flujo de una petición en NestJS
+# API de reservas - NestJS
 
-**Autor:** Leonardo Ayala
-**Actividad:** NestJS semana 5: Middleware, Exception Filters, Guards, Interceptors y Pipes
+Actividad de la semana 5. Es una API para hacer reservas en un restaurante. La usé para practicar el flujo de una petición en NestJS: middleware, exception filter, guard, pipe e interceptor.
 
-API para administrar las reservas de un restaurante. Cada componente de Nest
-cumple una sola responsabilidad dentro del ciclo de vida de la petición.
+## Cómo correrlo
 
----
-
-## 1. Requisitos (Linux)
-
-- Node.js 20 o superior
-- npm (viene con Node)
-- curl (para el script de pruebas; casi todas las distros lo traen)
-
-Verificar:
-
-```bash
-node -v    # debe ser v20.x o mayor
-npm -v
-```
-
-Si no tienes Node o tienes una versión vieja, la forma más simple es con **nvm**:
-
-```bash
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
-source ~/.bashrc
-nvm install --lts
-```
-
----
-
-## 2. Instalar y ejecutar
-
-```bash
-cd restaurant-api
-npm install          # descarga las dependencias en node_modules/
-npm run start:dev    # compila y arranca en modo desarrollo (se reinicia al guardar)
-```
-
-Si todo está bien, la consola muestra algo como:
+1. Instalar las dependencias:
 
 ```
-[RoutesResolver] ReservationsController {/reservations}
-[RouterExplorer] Mapped {/reservations, GET} route
-[RouterExplorer] Mapped {/reservations/test-error, GET} route
-[RouterExplorer] Mapped {/reservations, POST} route
-[NestApplication] Nest application successfully started
-API de reservas corriendo en http://localhost:3000
+npm install
 ```
 
----
+2. Arrancar el servidor:
 
-## 3. Probar los 6 casos de la actividad
-
-Con el servidor corriendo, abre **otra terminal** en la carpeta del proyecto:
-
-```bash
-chmod +x pruebas.sh
-./pruebas.sh
+```
+npm run start:dev
 ```
 
-| # | Escenario | Resultado esperado | Componente |
-|---|-----------|--------------------|------------|
-| 1 | POST válido + API key correcta | 201, `success: true` | Todos |
-| 2 | POST sin API key | 403 Forbidden | Guard |
-| 3 | Email inválido / datos vacíos | 400 con mensajes de validación | Pipe |
-| 4 | Excepción provocada (`/reservations/test-error`) | 400 con formato uniforme | Exception Filter |
-| 5 | Petición normal | Log en la consola del servidor | Middleware |
-| 6 | GET exitoso | Formato `success / data` | Interceptor |
+3. La API queda en `http://localhost:3000/reservations`.
 
-También se puede probar con Postman, Insomnia o Bruno:
+4. Para probarla, en Postman importé el archivo `Reservas.postman_collection.json` (Import → elegir el archivo).
 
-- **URL:** `http://localhost:3000/reservations`
-- **Header:** `x-api-key: restaurant-secret` (solo para el POST)
-- **Body → raw → JSON:**
+## Endpoints
+
+- `GET /reservations` → lista las reservas. Es público.
+- `POST /reservations` → crea una reserva. Necesita el header `x-api-key: restaurant-secret`.
+
+Ejemplo del body del POST:
 
 ```json
 {
@@ -84,126 +35,116 @@ También se puede probar con Postman, Insomnia o Bruno:
 }
 ```
 
-### Respuestas esperadas
+## Lo que hice paso a paso
 
-Éxito (caso 1):
+### 1. Crear el proyecto
 
-```json
-{
-  "success": true,
-  "data": { "id": 1, "customerName": "Carlos Pérez", "email": "carlos@email.com", "people": 4 },
-  "timestamp": "2026-10-01T15:35:42.123Z"
-}
+```
+nest new restaurant-api
+npm i class-validator class-transformer
+nest g module reservations
+nest g controller reservations --no-spec
+nest g service reservations --no-spec
 ```
 
-Error (caso 4):
+En el service guardo las reservas en un arreglo porque no hay base de datos. Por eso se borran cuando se reinicia el servidor.
+
+### 2. Middleware
+
+Archivo: `src/common/middleware/logger.middleware.ts`
+
+Muestra en la consola cada petición que llega, con el método, la ruta y la hora:
+
+```
+[REQUEST] POST /reservations - 10:35:42
+```
+
+Para el mini reto, cuando termina la respuesta muestra cuánto se demoró:
+
+```
+POST /reservations - 12ms
+```
+
+Lo registré en `app.module.ts` con `MiddlewareConsumer`, solo para las rutas de reservas.
+
+### 3. Exception filter
+
+Archivo: `src/common/filters/http-exception.filter.ts`
+
+Hace que todos los errores salgan con el mismo formato:
 
 ```json
 {
   "success": false,
   "statusCode": 400,
   "message": "Reservation data is invalid",
-  "path": "/reservations/test-error",
-  "timestamp": "2026-10-01T15:35:42.123Z"
+  "path": "/reservations",
+  "timestamp": "..."
 }
 ```
 
-Consola del servidor en el caso 1 (evidencia del orden del flujo):
+Lo registré global en `main.ts`. Para probarlo puse un rato `throw new BadRequestException('Reservation data is invalid');` en el POST del controller y después lo quité.
 
-```
-[REQUEST] POST /reservations - 10:35:42      <- Middleware
-[INTERCEPTOR] antes del controlador          <- Interceptor (antes)
-[CONTROLLER] creando reserva                 <- Controller (el Pipe ya validó)
-[INTERCEPTOR] después del controlador        <- Interceptor (después)
-POST /reservations - 12ms (status 201)       <- Middleware (mini reto)
-```
+### 4. Guard
 
-En el **caso 2** solo aparece el log del Middleware: el Guard corta la petición
-antes del Interceptor. En el **caso 3** aparece "antes" pero no el Controller:
-el Pipe rechazó los datos.
+Archivo: `src/common/guards/api-key.guard.ts`
 
----
+Revisa que la petición traiga el header `x-api-key: restaurant-secret`. Si no lo trae o está mal, responde 403.
 
-## 4. Estructura del proyecto
+Lo puse con `@UseGuards` solo en el POST, así el GET sigue siendo público (mini reto).
 
-```
-src/
-├── common/
-│   ├── filters/
-│   │   └── http-exception.filter.ts   -> formato uniforme de errores
-│   ├── guards/
-│   │   └── api-key.guard.ts           -> exige x-api-key en el POST
-│   ├── interceptors/
-│   │   └── response.interceptor.ts    -> formato { success, data, timestamp }
-│   └── middleware/
-│       └── logger.middleware.ts       -> log de método, ruta, hora y tiempo
-├── reservations/
-│   ├── dto/
-│   │   └── create-reservation.dto.ts  -> reglas de validación
-│   ├── reservations.controller.ts     -> rutas GET y POST
-│   ├── reservations.service.ts        -> lógica (reservas en memoria)
-│   └── reservations.module.ts         -> agrupa controller + service
-├── app.module.ts                      -> módulo raíz + registro del middleware
-└── main.ts                            -> arranque + pipe, filtro e interceptor globales
+### 5. Pipe (validación)
+
+Archivo: `src/reservations/dto/create-reservation.dto.ts`
+
+Reglas:
+
+- `customerName`: obligatorio
+- `email`: tiene que ser un email válido
+- `people`: número entero, mínimo 1
+
+Activé el `ValidationPipe` en `main.ts`. Si los datos están mal responde 400 con la lista de errores y el controller no se ejecuta.
+
+### 6. Interceptor
+
+Archivo: `src/common/interceptors/response.interceptor.ts`
+
+Hace que las respuestas que salen bien tengan este formato:
+
+```json
+{
+  "success": true,
+  "data": { "id": 1, "customerName": "Carlos Pérez", "email": "carlos@email.com", "people": 4 },
+  "timestamp": "..."
+}
 ```
 
----
+El `timestamp` es el mini reto. También lo registré global en `main.ts`.
 
-## 5. Flujo de la petición
+## Pruebas
+
+Las hice en Postman (están en `Reservas.postman_collection.json`):
+
+1. POST con datos bien y con API key → 201 y `success: true`
+2. POST sin API key → 403
+3. POST con datos mal (nombre vacío, email inválido, 0 personas) → 400 con los errores
+4. Error provocado con el `throw` → 400 con el formato del filter
+5. Cualquier petición → sale el log en la consola
+6. GET /reservations → `success: true` y la lista en `data`
+
+Así se ve la consola con un POST que sale bien:
 
 ```
-POST /reservations
-   ↓
-Middleware (logging)          logger.middleware.ts
-   ↓
-Guard (API Key)               api-key.guard.ts
-   ↓
-Interceptor (antes)           response.interceptor.ts
-   ↓
-Pipe (validación)             ValidationPipe + create-reservation.dto.ts
-   ↓
-Controller                    reservations.controller.ts
-   ↓
-Service                       reservations.service.ts
-   ↓
-Interceptor (después)         response.interceptor.ts
-   ↓
-Response
-
-Error → Exception Filter (http-exception.filter.ts) → Error Response
+[REQUEST] POST /reservations - 10:35:42
+[Interceptor] antes
+[Interceptor] después
+POST /reservations - 12ms
 ```
 
-### Dónde registré cada componente y por qué
+Ahí se ve el orden: primero el middleware, después el guard, el interceptor (antes), el pipe, el controller y otra vez el interceptor (después). Cuando no mando la API key solo salen los logs del middleware, porque el guard corta la petición antes.
 
-| Componente | Dónde | Por qué |
-|------------|-------|---------|
-| Middleware | `app.module.ts` con `MiddlewareConsumer` | En Nest los middlewares se configuran por rutas dentro de un módulo |
-| Exception Filter | Global en `main.ts` | Todos los errores de la app deben tener el mismo formato |
-| Guard | `@UseGuards` en el método `POST` | Solo el POST se protege; el GET queda público (mini reto) |
-| ValidationPipe | Global en `main.ts` | Cualquier DTO de la app se valida automáticamente |
-| Interceptor | Global en `main.ts` | Todas las respuestas exitosas deben tener el mismo formato |
+## Pregunta de análisis
 
----
+**¿Qué diferencia hay entre lanzar un BadRequestException y crear un Exception Filter?**
 
-## 6. Pregunta de análisis
-
-**¿Cuál es la diferencia entre lanzar una `BadRequestException` y crear un Exception Filter?**
-
-Lanzar una `BadRequestException` es **avisar que algo salió mal**: se hace en
-el lugar donde detecto el problema y dice qué pasó (el código 400 y el mensaje).
-El Exception Filter es **el encargado de responder** a ese aviso: atrapa la
-excepción y decide cómo se ve la respuesta que recibe el cliente. El `throw` se
-escribe muchas veces, en cada lugar donde puede fallar algo; el filtro se escribe
-una sola vez y garantiza que todos los errores tengan la misma estructura.
-
----
-
-## 7. Problemas comunes
-
-| Problema | Solución |
-|----------|----------|
-| `EADDRINUSE: address already in use :::3000` | Ya hay otra instancia corriendo. Ciérrala con Ctrl+C o ejecuta `fuser -k 3000/tcp`. También puedes usar otro puerto: `PORT=3001 npm run start:dev` |
-| `nest: command not found` | Usa siempre `npm run start:dev`, que toma el CLI desde `node_modules` |
-| `./pruebas.sh: Permission denied` | Ejecuta `chmod +x pruebas.sh` |
-| Todas las respuestas del POST dan 403 | Revisa que el header sea exactamente `x-api-key: restaurant-secret` |
-| Las reservas desaparecen | Es normal: se guardan en memoria y se pierden al reiniciar el servidor |
+El `BadRequestException` se lanza en el lugar donde pasa el error y dice qué salió mal. El exception filter es el que recibe ese error y decide cómo se le muestra al cliente. El throw se puede poner en muchas partes, pero el filter se hace una sola vez y así todos los errores salen con el mismo formato.
